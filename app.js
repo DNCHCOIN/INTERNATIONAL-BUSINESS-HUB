@@ -48,7 +48,8 @@ function setLanguage(language){
  document.getElementById('navigation').setAttribute('aria-label',dictionary.menu);
  selector.value=selected;
  // TRADE already supports its own language parameter. LOGISTICS remains unchanged.
- document.querySelector('.launch-trade').href='https://dnchcoin.github.io/TRADE-TSVETAN/?lang='+selected.toUpperCase();
+ document.querySelectorAll('a[href*="/TRADE-TSVETAN/"]').forEach(a=>a.href='https://dnchcoin.github.io/TRADE-TSVETAN/?lang='+selected.toUpperCase());
+ document.querySelectorAll('a[href*="/CASPIAN-LOGISTICS/"]').forEach(a=>a.href='https://dnchcoin.github.io/CASPIAN-LOGISTICS/?lang='+selected);
  const current=new URL(location.href); current.searchParams.set('lang',selected);
  try{history.replaceState(null,'',current);localStorage.setItem('ibh_language',selected)}catch{}
 }
