@@ -1,0 +1,41 @@
+# Local identity-service development only. NEVER expose this compose project on the internet.
+# Production requires TLS/reverse proxy, key management, backups and security review.
+services:
+  identity-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${IDENTITY_DB_NAME:?Set IDENTITY_DB_NAME}
+      POSTGRES_USER: ${IDENTITY_DB_USER:?Set IDENTITY_DB_USER}
+      POSTGRES_PASSWORD: ${IDENTITY_DB_PASSWORD:?Set IDENTITY_DB_PASSWORD}
+    volumes:
+      - identity_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${IDENTITY_DB_USER} -d ${IDENTITY_DB_NAME}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [identity_private]
+  identity:
+    image: quay.io/keycloak/keycloak:26.8.2
+    restart: unless-stopped
+    command: ["start-dev"]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://identity-db:5432/${IDENTITY_DB_NAME:?Set IDENTITY_DB_NAME}
+      KC_DB_USERNAME: ${IDENTITY_DB_USER:?Set IDENTITY_DB_USER}
+      KC_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?Set IDENTITY_DB_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${IDENTITY_ADMIN_USER:?Set IDENTITY_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${IDENTITY_ADMIN_PASSWORD:?Set IDENTITY_ADMIN_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:8086:8080"
+    depends_on:
+      identity-db:
+        condition: service_healthy
+    networks: [identity_private]
+volumes:
+  identity_db_data:
+networks:
+  identity_private:
+    internal: true
