@@ -31,6 +31,9 @@ developmentKicker:"透明的发展进程",developmentTitle:"当前功能与未�
 close:"关闭",dialogTitle:"统一登录尚在规划中。",dialogDescription:"集中注册与统一企业资料尚未实施。本演示不会创建账户，也不会授予其他平台的访问权限。",dialogPlan:"规划中的系统",dialog1:"一个企业资料，支持邀请员工",dialog2:"角色：企业所有者、贸易人员、物流人员和管理员",dialog3:"基于 OIDC 的统一登录，各平台独立授权",dialog4:"安全 API，仅交换经授权的数据",continueDemo:"浏览演示平台"
 }
 };
+Object.assign(translations.bg, {"loginHeading":"Вход в екосистемата","loginHelp":"Предварителен изглед. Общият вход ще работи след защитено свързване на TRADE и LOGISTICS.","loginUser":"Потребителско име","loginPassword":"Парола","loginDisabled":"Входът още не е активен","loginWarning":"Не въвеждай парола в демонстрационната версия."});
+Object.assign(translations.en, {"loginHeading":"Ecosystem sign-in","loginHelp":"Preview only. Shared sign-in will be available after secure integration of TRADE and LOGISTICS.","loginUser":"Username","loginPassword":"Password","loginDisabled":"Sign-in is not active yet","loginWarning":"Do not enter a password in the demo."});
+Object.assign(translations.zh, {"loginHeading":"生态系统登录","loginHelp":"仅供预览。TRADE 和 LOGISTICS 完成安全集成后才会启用统一登录。","loginUser":"用户名","loginPassword":"密码","loginDisabled":"登录尚未启用","loginWarning":"请勿在演示版输入密码。"});
 const selector=document.getElementById('language');
 function setLanguage(language){
  const selected=Object.hasOwn(translations,language)?language:'bg';
