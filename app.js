@@ -61,6 +61,8 @@ toggle.addEventListener('click',()=>{const open=toggle.getAttribute('aria-expand
 menu.querySelectorAll('a').forEach(a=>a.addEventListener('click',()=>{menu.classList.remove('open');toggle.setAttribute('aria-expanded','false')}));
 document.addEventListener('keydown',event=>{if(event.key==='Escape'){menu.classList.remove('open');toggle.setAttribute('aria-expanded','false')}});
 const dialog=document.getElementById('account-dialog');
+// Preview fields are never submitted or persisted; clear them when the dialog closes.
+dialog.addEventListener('close',()=>{document.getElementById('login-username').value='';document.getElementById('login-password').value='';});
 document.querySelectorAll('[data-account]').forEach(button=>button.addEventListener('click',()=>dialog.showModal()));
 document.getElementById('close-dialog').addEventListener('click',()=>dialog.close());
 document.getElementById('dialog-platforms').addEventListener('click',()=>dialog.close());
