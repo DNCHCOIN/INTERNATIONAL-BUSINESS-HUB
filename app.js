@@ -47,7 +47,7 @@ function setLanguage(language){
  document.querySelectorAll('[data-i18n-aria]').forEach(el=>el.setAttribute('aria-label',dictionary[el.dataset.i18nAria]));
  document.getElementById('navigation').setAttribute('aria-label',dictionary.menu);
  selector.value=selected;
- // TRADE already supports its own language parameter. LOGISTICS remains unchanged.
+ // Pass the selected locale to both independent platforms (TRADE expects uppercase, CASPIAN lowercase).
  document.querySelectorAll('a[href*="/TRADE-TSVETAN/"]').forEach(a=>a.href='https://dnchcoin.github.io/TRADE-TSVETAN/?lang='+selected.toUpperCase());
  document.querySelectorAll('a[href*="/CASPIAN-LOGISTICS/"]').forEach(a=>a.href='https://dnchcoin.github.io/CASPIAN-LOGISTICS/?lang='+selected);
  const current=new URL(location.href); current.searchParams.set('lang',selected);
