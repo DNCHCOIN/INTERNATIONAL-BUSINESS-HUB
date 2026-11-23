@@ -34,6 +34,9 @@ close:"关闭",dialogTitle:"统一登录尚在规划中。",dialogDescription:"�
 Object.assign(translations.bg, {"loginHeading":"Вход в екосистемата","loginHelp":"Предварителен изглед. Общият вход ще работи след защитено свързване на TRADE и LOGISTICS.","loginUser":"Потребителско име","loginPassword":"Парола","loginDisabled":"Входът още не е активен","loginWarning":"Не въвеждай парола в демонстрационната версия."});
 Object.assign(translations.en, {"loginHeading":"Ecosystem sign-in","loginHelp":"Preview only. Shared sign-in will be available after secure integration of TRADE and LOGISTICS.","loginUser":"Username","loginPassword":"Password","loginDisabled":"Sign-in is not active yet","loginWarning":"Do not enter a password in the demo."});
 Object.assign(translations.zh, {"loginHeading":"生态系统登录","loginHelp":"仅供预览。TRADE 和 LOGISTICS 完成安全集成后才会启用统一登录。","loginUser":"用户名","loginPassword":"密码","loginDisabled":"登录尚未启用","loginWarning":"请勿在演示版输入密码。"});
+Object.assign(translations.bg, {loginUserPlaceholder:"Въведи демо потребителско име"});
+Object.assign(translations.en, {loginUserPlaceholder:"Enter a demo username"});
+Object.assign(translations.zh, {loginUserPlaceholder:"请输入演示用户名"});
 const selector=document.getElementById('language');
 function setLanguage(language){
  const selected=Object.hasOwn(translations,language)?language:'bg';
@@ -45,6 +48,7 @@ function setLanguage(language){
   else el.textContent=dictionary[key];
  });
  document.querySelectorAll('[data-i18n-aria]').forEach(el=>el.setAttribute('aria-label',dictionary[el.dataset.i18nAria]));
+ document.querySelectorAll('[data-i18n-placeholder]').forEach(el=>el.setAttribute('placeholder',dictionary[el.dataset.i18nPlaceholder]));
  document.getElementById('navigation').setAttribute('aria-label',dictionary.menu);
  selector.value=selected;
  // Pass the selected locale to both independent platforms (TRADE expects uppercase, CASPIAN lowercase).
