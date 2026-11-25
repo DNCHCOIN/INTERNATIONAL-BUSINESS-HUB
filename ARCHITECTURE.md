@@ -1,3 +1,7 @@
+# Current private implementation
+
+See [platform/README.md](platform/README.md) for the implemented architecture on this development branch. The earlier OIDC proposal below remains the future separate-domain target. The current private staging uses a lightweight server session across three loopback ports, separate PostgreSQL databases and server-enforced company roles. It is not cross-domain OIDC SSO.
+
 # Proposed next stage — not implemented
 ## Current boundary
 The hub is a static navigation portal. Its outgoing HTTPS links do not create technical integration.

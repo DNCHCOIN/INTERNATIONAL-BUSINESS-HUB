@@ -27,3 +27,8 @@ No build or package installation is needed.
 GitHub Pages: Settings → Pages → Deploy from a branch → main → / (root).
 See ARCHITECTURE.md for the proposed next stage.
 
+
+
+## Private business implementation — development, 25 November 2026
+
+This branch adds the PostgreSQL-backed operational platform, separate from the public static demo. See [platform/README.md](platform/README.md) for implemented business flows, security boundaries, tests and remaining launch dependencies. Public production, real shipments, Cloudflare Tunnel and Grupaj.bg are not changed. No client acceptance or 100% completion is claimed.

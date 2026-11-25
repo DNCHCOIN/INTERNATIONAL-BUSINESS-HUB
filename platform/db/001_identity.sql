@@ -44,5 +44,7 @@ CREATE TABLE IF NOT EXISTS identity.documents (
  visibility text NOT NULL DEFAULT 'company' CHECK(visibility='company'),
  review_note text NOT NULL DEFAULT '', created_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE identity.companies ADD COLUMN IF NOT EXISTS legal_revision integer NOT NULL DEFAULT 1;
+ALTER TABLE identity.documents ADD COLUMN IF NOT EXISTS legal_revision integer NOT NULL DEFAULT 1;
 REVOKE ALL ON ALL TABLES IN SCHEMA identity FROM PUBLIC;
 COMMIT;

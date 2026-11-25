@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import pg from 'pg';
 import {randomBytes} from 'node:crypto';
 import {start} from '../src/server.mjs';
-import {uuid,passwordHash} from '../src/common.mjs';
+import {uuid,passwordHash,digest} from '../src/common.mjs';
 const file=process.env.DNCH_TEST_CONFIG;if(!file||!file.includes('qa-'))throw new Error('Disposable qa- configuration required');
 const config=JSON.parse(await fs.readFile(file,'utf8'));config.ports={hub:18903,trade:18901,caspian:18902};
 let app=await start(config),checks=0;const suffix=randomBytes(6).toString('hex'),password=randomBytes(24).toString('base64url');
@@ -12,7 +12,7 @@ class Agent{
  cookie='';csrf='';
  async call(area,url,method='GET',body,expected=200,extra={}){
   const origin=`http://127.0.0.1:${config.ports[area]}`;
-  const res=await fetch(origin+url,{method,headers:{Origin:origin,'Content-Type':'application/json','X-DNCH-Request':'1','X-CSRF-Token':this.csrf,Cookie:this.cookie,...extra},...(body===undefined?{}:{body:JSON.stringify(body)})});
+  const res=await fetch(origin+url,{method,headers:{Connection:'close',Origin:origin,'Content-Type':'application/json','X-DNCH-Request':'1','X-CSRF-Token':this.csrf,Cookie:this.cookie,...extra},...(body===undefined?{}:{body:JSON.stringify(body)})});
   const cookie=res.headers.get('set-cookie');if(cookie)this.cookie=cookie.split(';')[0];
   const raw=await res.text();let data;try{data=JSON.parse(raw);}catch{data=raw;}
   assert.equal(res.status,expected,`${area} ${method} ${url}: ${JSON.stringify(data)}`);checks++;
@@ -40,6 +40,7 @@ async function verify(agent){
 try{
  await anon.call('caspian','/api/caspian/cargo','GET',undefined,401);
  await anon.call('hub','/api/auth/login','POST',{email:'x@example.invalid',password},403,{Origin:'https://untrusted.invalid'});
+ await anon.call('hub','/api/auth/register','POST',{...company(8),website:'invalid-url'},422);
  await a.register(1);await b.register(2);
  const me=await a.call('trade','/api/auth/me');assert.equal(me.user.system_role,'company');assert.equal(me.user.company_status,'pending');assert.equal('password_hash' in me.user,false);
  await a.call('trade','/api/trade/listings','POST',{...listing,status:'published'},403);
@@ -56,6 +57,7 @@ try{
  await a.call('hub','/api/documents/'+bd.id,'GET',undefined,404);
  await admin.call('hub',`/api/documents/${bd.id}/review`,'POST',{status:'reviewed',note:'Synthetic document review for B only'});
  await admin.call('hub',`/api/admin/companies/${b.company}/review`,'POST',{status:'verified',note:'Synthetic company B approval for QA only',version:1});await b.call('hub','/api/auth/me');
+ const filtered=await a.call('hub','/api/directory?sector=Technology&activity=Manufacturer&employees=1-5&language=zh');assert.equal(filtered.items.length,2);assert.equal((await a.call('hub','/api/directory?sector=Agriculture')).items.length,0);
  const own=(await a.call('trade','/api/trade/listings?mine=1')).items;assert.equal(own.length,1);
  await a.call('trade','/api/trade/listings/'+draft.id,'PUT',{...listing,status:'published',version:1});
  await b.call('trade','/api/trade/listings/'+draft.id,'PUT',{...listing,version:2},404);
@@ -63,6 +65,18 @@ try{
  const publicList=await anon.call('trade','/api/trade/listings');assert.equal(publicList.visibility,'product_only');assert.ok(!JSON.stringify(publicList).includes('contact-'));assert.ok(!JSON.stringify(publicList).includes('+359'));assert.ok(!JSON.stringify(publicList).includes('company_id'));
  const registered=await b.call('trade','/api/trade/listings');assert.equal(registered.items[0].company.contact.phone,'+359000000000');
  const inj=await anon.call('trade','/api/trade/listings?q='+encodeURIComponent("' OR 1=1 --"));assert.equal(inj.items.length,0);
+ const catalogue=await a.call('trade','/api/documents','POST',{kind:'catalogue',parent_id:draft.id,name:'catalogue.pdf',content_base64:pdf.toString('base64')},201);
+ await a.call('trade',`/api/documents/${catalogue.id}`,'PATCH',{visibility:'registered'},409);
+ await b.call('trade',`/api/documents/${catalogue.id}`,'GET',undefined,404);
+ await admin.call('trade',`/api/documents/${catalogue.id}/review`,'POST',{status:'reviewed',note:'Synthetic catalogue inspected for test only'});
+ await a.call('trade',`/api/documents/${catalogue.id}`,'PATCH',{visibility:'registered'});
+ await b.call('trade',`/api/documents/${catalogue.id}`);
+ await anon.call('trade',`/api/documents/${catalogue.id}`,'GET',undefined,401);
+ assert.equal((await b.call('trade','/api/documents?listing_id='+draft.id)).items.length,1);
+ await b.call('trade',`/api/documents/${catalogue.id}`,'PATCH',{visibility:'company'},404);
+ await a.call('trade',`/api/documents/${catalogue.id}`,'PATCH',{visibility:'company'});
+ await b.call('trade',`/api/documents/${catalogue.id}`,'GET',undefined,404);
+ await a.call('trade',`/api/documents/${catalogue.id}`,'PATCH',{visibility:'registered'});
  const inquiry=await b.call('trade','/api/trade/inquiries','POST',{listing_id:draft.id,subject:'Synthetic supply request',message:'Synthetic request for commercial details'},201);
  await a.call('trade',`/api/trade/inquiries/${inquiry.id}/messages`,'POST',{message:'Synthetic response with availability'},201);
  assert.equal((await b.call('trade',`/api/trade/inquiries/${inquiry.id}`)).messages.length,1);
@@ -71,6 +85,18 @@ try{
  await viewer.call('trade','/api/trade/listings','POST',listing,403);
  await viewer.call('caspian','/api/caspian/cargo','POST',cargo,403);
  await viewer.call('hub','/api/company/invitations','POST',{email:'forbidden@example.invalid',role:'owner'},403);
+ await b.call('caspian','/api/caspian/broker-profile','PUT',{version:0,locations:['Alat','Aktau'],services:['customs','documentation'],description:'Synthetic customs broker for integration tests only',license_reference:'SYNTHETIC-LICENCE-001',publish_consent:true});
+ assert.equal((await a.call('caspian','/api/caspian/brokers')).items.length,0);
+ await a.call('hub','/api/admin/brokers','GET',undefined,403);
+ await admin.call('hub',`/api/admin/brokers/${b.company}`,'POST',{status:'approved',note:'Approval without certificate must fail',version:1},409);
+ const cert=await b.call('hub','/api/documents','POST',{kind:'certificate',name:'synthetic-broker-evidence.pdf',content_base64:pdf.toString('base64')},201);
+ await admin.call('hub',`/api/documents/${cert.id}/review`,'POST',{status:'reviewed',note:'Synthetic broker evidence reviewed for QA only'});
+ await admin.call('hub',`/api/admin/brokers/${b.company}`,'POST',{status:'approved',note:'Synthetic broker approved for QA; no real accreditation',version:1});
+ assert.equal((await a.call('caspian','/api/caspian/brokers?location=Aktau')).items.length,1);
+ const brokerRequest=await a.call('caspian','/api/caspian/broker-inquiries','POST',{recipient_id:b.company,message:'Synthetic customs support request for Alat crossing'},201);
+ await a.call('caspian',`/api/caspian/broker-inquiries/${brokerRequest.id}`,'PATCH',{status:'accepted'},403);
+ await b.call('caspian',`/api/caspian/broker-inquiries/${brokerRequest.id}`,'PATCH',{status:'accepted'});
+ assert.equal((await b.call('caspian','/api/caspian/broker-inquiries')).items[0].status,'accepted');
  const cargoA=await a.call('caspian','/api/caspian/cargo','POST',cargo,201),cargoB=await a.call('caspian','/api/caspian/cargo','POST',{...cargo,reference:cargo.reference+'-B'},201);
  await a.call('caspian','/api/caspian/cargo','POST',{...cargo,reference:'invalid',synthetic:false},422);
  assert.equal((await b.call('caspian','/api/caspian/cargo')).items.length,0);
@@ -90,18 +116,35 @@ try{
  const wh=await a.call('caspian','/api/caspian/warehouses','POST',{name:'Synthetic Poti hub',location:'Poti',capacity_m3:100,capacity_kg:10000,daily_eur:20},201);
  const reservation={warehouse_id:wh.id,shipment_id:shipment.id,volume_m3:60,weight_kg:1000,starts_on:today,ends_on:nextYear};
  const origin=`http://127.0.0.1:${config.ports.caspian}`;
- const simultaneous=await Promise.all([1,2].map(()=>fetch(origin+'/api/caspian/reservations',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json','X-DNCH-Request':'1','X-CSRF-Token':a.csrf,Cookie:a.cookie},body:JSON.stringify(reservation)})));
+ const simultaneous=await Promise.all([1,2].map(()=>fetch(origin+'/api/caspian/reservations',{method:'POST',headers:{Connection:'close',Origin:origin,'Content-Type':'application/json','X-DNCH-Request':'1','X-CSRF-Token':a.csrf,Cookie:a.cookie},body:JSON.stringify(reservation)})));
  assert.deepEqual(simultaneous.map(r=>r.status).sort(),[201,409]);checks+=2;
  await b.call('caspian','/api/caspian/reservations','POST',reservation,404);
+ const wh2=await a.call('caspian','/api/caspian/warehouses','POST',{name:'Synthetic overlap boundary',location:'Aktau',capacity_m3:100,capacity_kg:10000,daily_eur:10},201);
+ await a.call('caspian','/api/caspian/reservations','POST',{...reservation,warehouse_id:wh2.id,starts_on:'2026-01-01',ends_on:'2026-02-01'},201);
+ await a.call('caspian','/api/caspian/reservations','POST',{...reservation,warehouse_id:wh2.id,starts_on:'2026-02-01',ends_on:'2026-03-01'},201);
+ await a.call('caspian','/api/caspian/reservations','POST',{...reservation,warehouse_id:wh2.id,volume_m3:40,starts_on:'2026-01-01',ends_on:'2026-03-01'},201);
+
  const sd=await a.call('caspian','/api/documents','POST',{kind:'invoice',parent_id:shipment.id,name:'synthetic-invoice.pdf',content_base64:pdf.toString('base64')},201);
  await b.call('caspian','/api/documents/'+sd.id,'GET',undefined,404);
+ assert.equal((await app.pools.trade.query("SELECT has_database_privilege(current_user,'dnch_identity','CONNECT') AS allowed")).rows[0].allowed,false);
  const grants=await app.pools.trade.query('SELECT rolname,rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user');assert.equal(grants.rows[0].rolsuper,false);assert.equal(grants.rows[0].rolbypassrls,false);
- const badPool=new pg.Pool({...config.databases.trade,database:config.databases.identity.database});try{await assert.rejects(badPool.query('SELECT 1'),e=>e.code==='42501');}finally{await badPool.end();}checks++;
+ const badPool=new pg.Pool({...config.databases.trade,database:config.databases.identity.database});try{await assert.rejects(badPool.query('SELECT 1'),e=>['42501','28000'].includes(e.code));}finally{await badPool.end();}checks++;
  await assert.rejects(app.pools.identity.query('DELETE FROM identity.audit'),e=>e.code==='42501');checks++;
+ const stats=await admin.call('hub','/api/dashboard');assert.equal(stats.shipments,1);assert.equal(stats.listings,1);assert.equal(stats.brokers_pending,0);
  const before=await a.call('hub','/api/company');await a.call('hub','/api/company','PUT',{...company(1),version:before.version,description:'Synthetic edited operational profile description'});await a.call('hub','/api/auth/me');assert.equal(a.csrf.length,43);const after=await a.call('hub','/api/company');assert.equal(after.status,'verified');
  await a.call('hub','/api/company','PUT',{...company(1),version:after.version,name_latin:'Changed synthetic legal name'});const recheck=await a.call('hub','/api/company');assert.equal(recheck.status,'pending');
+ await admin.call('hub',`/api/admin/companies/${a.company}/review`,'POST',{status:'verified',note:'Old evidence cannot verify changed legal identity',version:recheck.version},409);
+ await b.call('trade',`/api/documents/${catalogue.id}`,'GET',undefined,404);
+
  assert.equal((await anon.call('trade','/api/trade/listings')).items.length,0);
  await app.close();app=await start(config);assert.equal((await a.call('caspian','/api/caspian/shipments')).items.length,1);await a.call('hub','/api/documents/'+document.id);
+ const oldSession=new Agent();oldSession.cookie=a.cookie;oldSession.csrf=a.csrf;const newPassword=randomBytes(24).toString('base64url');
+ await a.call('hub','/api/auth/password','POST',{current_password:'incorrect',new_password:newPassword},401);
+ await a.call('hub','/api/auth/password','POST',{current_password:password,new_password:newPassword});await a.call('hub','/api/auth/me');
+ await oldSession.call('caspian','/api/caspian/cargo','GET',undefined,401);
+ await anon.call('hub','/api/auth/login','POST',{email:company(1).email,password},401);
+ const expiring=new Agent();await expiring.call('hub','/api/auth/login','POST',{email:company(1).email,password:newPassword});await expiring.call('hub','/api/auth/me');
+ await app.pools.identity.query("UPDATE identity.sessions SET expires_at=now()-interval '1 second' WHERE token_hash=$1",[digest(expiring.cookie.slice(13))]);await expiring.call('caspian','/api/caspian/cargo','GET',undefined,401);
  const who=await viewer.call('hub','/api/auth/me');await a.call('hub','/api/company/members/'+who.user.id,'PATCH',{role:'viewer',active:false});await viewer.call('trade','/api/trade/listings?mine=1','GET',undefined,401);
  await a.call('hub','/api/auth/logout','POST',{});await a.call('caspian','/api/caspian/shipments','GET',undefined,401);
  console.log(JSON.stringify({result:'PASS',http_and_security_checks:checks,coverage:['registration','persistent_shared_session','roles','tenant_isolation','verification','encrypted_documents','trade_lifecycle','inquiries','multimodal_routes','matching','tracking_idempotency','late_events','concurrent_capacity','database_roles','restart_persistence','logout']}));

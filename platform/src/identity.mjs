@@ -48,6 +48,14 @@ export async function identityRoutes(ctx){
  if(p==='/api/company' && method==='GET'){
   const u=requireCompany(ctx);return (await identity.query('SELECT * FROM identity.companies WHERE id=$1',[u.company_id])).rows[0];
  }
+ if(p==='/api/auth/password' && method==='POST'){
+  const u=requireUser(ctx);ctx.limit(`password:${u.id}`,8,900000);
+  const account=(await identity.query('SELECT password_hash FROM identity.users WHERE id=$1',[u.id])).rows[0];
+  if(!await passwordMatches(body.current_password,account.password_hash))fail(401,'invalid_credentials');
+  const hashed=await passwordHash(body.new_password);
+  await transaction(identity,async c=>{await c.query('UPDATE identity.users SET password_hash=$2 WHERE id=$1',[u.id,hashed]);await c.query('DELETE FROM identity.sessions WHERE user_id=$1',[u.id]);await audit(c,u.company_id||null,u.id,'password.changed',u.id);});
+  await session(ctx,u.id);return {ok:true,other_sessions_revoked:true};
+ }
  if(p==='/api/company' && method==='PUT'){
   const u=requireCompany(ctx);check(u.role==='owner','role_denied',403);const data=companyInput(body);check(Number.isInteger(body.version),'version_required');
   return transaction(identity,async c=>{
@@ -56,7 +64,7 @@ export async function identityRoutes(ctx){
    // Legal identity changes always return to review. Operational edits keep existing verification.
    const legal=['country','registration_number','name_native','name_latin','legal_form','vat_number','address'];
    const changed=legal.some(k=>k==='address'?Object.keys(data.address).some(a=>old.address[a]!==data.address[a]):old[k]!==data[k]);
-   const result=await c.query(`UPDATE identity.companies SET country=$2,registration_number=$3,name_native=$4,name_latin=$5,legal_form=$6,vat_number=$7,address=$8,profile=$9,status=$10,review_note=CASE WHEN $11 THEN '' ELSE review_note END,version=version+1 WHERE id=$1 RETURNING *`,[u.company_id,...['country','registration_number','name_native','name_latin','legal_form','vat_number','address','profile'].map(k=>data[k]),changed?'pending':old.status,changed]);
+   const result=await c.query(`UPDATE identity.companies SET country=$2,registration_number=$3,name_native=$4,name_latin=$5,legal_form=$6,vat_number=$7,address=$8,profile=$9,status=$10,review_note=CASE WHEN $11 THEN '' ELSE review_note END,legal_revision=legal_revision+CASE WHEN $11 THEN 1 ELSE 0 END,version=version+1 WHERE id=$1 RETURNING *`,[u.company_id,...['country','registration_number','name_native','name_latin','legal_form','vat_number','address','profile'].map(k=>data[k]),changed?'pending':old.status,changed]);
    await audit(c,u.company_id,u.id,'company.updated',u.company_id,{legal_changed:changed});return result.rows[0];
   });
  }
@@ -85,7 +93,8 @@ export async function identityRoutes(ctx){
  }
  if(p==='/api/directory' && method==='GET'){
   requireCompany(ctx,null,true);const q=str(url.searchParams.get('q')||'',0,100),country=url.searchParams.get('country')||'';
-  const r=await identity.query(`SELECT id,name_native,name_latin,country,profile,address,status FROM identity.companies WHERE status='verified' AND ($1='' OR (name_native||' '||name_latin||' '||profile::text) ILIKE '%'||$1||'%') AND ($2='' OR country=$2) ORDER BY name_latin LIMIT 100`,[q,country]);return {items:r.rows};
+  const filters=['sector','activity','employees','language'].map(k=>str(url.searchParams.get(k)||'',0,100));
+  const r=await identity.query(`SELECT id,name_native,name_latin,country,profile,address,status FROM identity.companies WHERE status='verified' AND ($1='' OR (name_native||' '||name_latin||' '||profile::text) ILIKE '%'||$1||'%') AND ($2='' OR country=$2) AND ($3='' OR profile->>'sector'=$3) AND ($4='' OR profile->>'activity'=$4) AND ($5='' OR profile->>'employees'=$5) AND ($6='' OR profile->'languages' ? $6) ORDER BY name_latin LIMIT 100`,[q,country,...filters]);return {items:r.rows};
  }
  if(p==='/api/admin/companies' && method==='GET'){
   requireAdmin(ctx);return {items:(await identity.query('SELECT id,country,registration_number,name_native,name_latin,status,review_note,version,created_at FROM identity.companies ORDER BY created_at DESC LIMIT 100')).rows};
@@ -95,11 +104,23 @@ export async function identityRoutes(ctx){
   const u=requireAdmin(ctx),cid=id(review[1]),state=choice(body.status,['verified','rejected','suspended']);const note=str(body.note,10,2000);
   return transaction(identity,async c=>{
    const company=(await c.query('SELECT * FROM identity.companies WHERE id=$1 FOR UPDATE',[cid])).rows[0];check(company,'not_found',404);check(body.version===company.version,'version_conflict',409);
-   if(state==='verified'){const docs=await c.query("SELECT id FROM identity.documents WHERE company_id=$1 AND kind='registration' AND status='reviewed'",[cid]);check(docs.rowCount>0,'reviewed_registration_document_required',409);}
+   if(state==='verified'){const docs=await c.query("SELECT id FROM identity.documents WHERE company_id=$1 AND kind='registration' AND status='reviewed' AND legal_revision=$2",[cid,company.legal_revision]);check(docs.rowCount>0,'reviewed_registration_document_required',409);}
    await c.query('UPDATE identity.companies SET status=$2,review_note=$3,reviewed_by=$4,reviewed_at=now(),version=version+1 WHERE id=$1',[cid,state,note,u.id]);
    await audit(c,cid,u.id,'company.reviewed',cid,{status:state,note});return {ok:true,status:state};
   });
  }
  if(p==='/api/admin/audit' && method==='GET'){requireAdmin(ctx);return {items:(await identity.query('SELECT id,company_id,actor_id,action,entity_id,details,created_at FROM identity.audit ORDER BY id DESC LIMIT 100')).rows};}
+ if(p==='/api/admin/brokers' && method==='GET'){
+  requireAdmin(ctx);return transaction(ctx.caspian,async c=>{await c.query("SELECT set_config('app.broker_reviewer','on',true)");const names=new Map((await identity.query('SELECT id,name_native FROM identity.companies')).rows.map(r=>[r.id,r.name_native]));return {items:(await c.query('SELECT * FROM caspian.broker_profiles ORDER BY updated_at DESC LIMIT 100')).rows.map(b=>({...b,company_name:names.get(b.organization_id)}))};});
+ }
+ const brokerReview=p.match(/^\/api\/admin\/brokers\/([\w-]+)$/);
+ if(brokerReview && method==='POST'){
+  const u=requireAdmin(ctx),cid=id(brokerReview[1]),state=choice(body.status,['approved','suspended']);const note=str(body.note,10,2000);
+  return transaction(ctx.caspian,async c=>{
+   await c.query("SELECT set_config('app.broker_reviewer','on',true)");const broker=(await c.query('SELECT * FROM caspian.broker_profiles WHERE organization_id=$1 FOR UPDATE',[cid])).rows[0];check(broker,'not_found',404);check(body.version===broker.version,'version_conflict',409);
+   if(state==='approved'){const evidence=await identity.query("SELECT c.id FROM identity.companies c JOIN identity.documents d ON d.company_id=c.id AND d.legal_revision=c.legal_revision WHERE c.id=$1 AND c.status='verified' AND c.legal_revision=$2 AND d.kind='certificate' AND d.status='reviewed'",[cid,broker.identity_revision]);check(evidence.rowCount,'reviewed_broker_certificate_required',409);}
+   await c.query('UPDATE caspian.broker_profiles SET status=$2,review_note=$3,reviewed_by=$4,version=version+1 WHERE organization_id=$1',[cid,state,note,u.id]);await identity.query("INSERT INTO identity.audit(company_id,actor_id,action,entity_id,details) VALUES($1,$2,'broker.reviewed',$4,$3)",[cid,u.id,{status:state,note},cid]);return {ok:true};
+  });
+ }
  return undefined;
 }

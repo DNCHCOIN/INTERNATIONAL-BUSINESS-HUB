@@ -12,13 +12,14 @@ The host has 4 GB RAM and also runs DNCH System. The development Keycloak compos
 | --- | --- | --- |
 | HUB-03/04, TR-01/02/03/08 | Registration, shared server session, company ownership, trader/dispatcher/viewer roles | Private synthetic staging only; public TLS/MFA/recovery still required |
 | TR-04 | Private registration evidence, reviewer note, manual company decisions; legal edits require re-review | No live registry checks, legal certification or email ownership verification |
-| HUB-05/07 | Company dashboard, team invitations, admin approvals, audit | Individual production administrator accounts need provisioning and MFA |
-| TR-05/06/07 | Database catalogue/filtering, owner CRUD/version checks, expiry, inquiry threads, private documents | Human linguistic/visual acceptance and document publication remain to validate |
+| HUB-05/07 | Company dashboard, password changes, team invitations, admin approvals, aggregate activity, audit | Individual production administrator accounts need provisioning and MFA |
+| TR-05/06/07 | Database catalogue/filtering, owner CRUD/version checks, expiry, inquiry threads, private documents | Explicit reviewed-catalogue sharing implemented; human linguistic/visual acceptance remains |
 | CL-DB-02, CL-01/04 | Existing CASPIAN PostgreSQL schema extended; multimodal route alternatives | Costs, times, waits, capacities are explicitly synthetic assumptions |
 | CL-08/09 | Persistent milestone events, idempotency, late-event protection, timeline export; scenario delay buffers | No infrastructure feed or calibrated historical prediction model |
 | CL-10/11 | Capacity/date/temperature/ADR matching, persisted groups; private warehouses and reservations | Own-company scope only; no external physical warehouse booking |
 | CL-05/06 | Encrypted document upload, metadata, review/checklist | e-CMR/e-TIR upload is not issuance, acceptance or customs submission |
-| CL-02/03/05/07 | Explicit unavailable integration capabilities and future adapter requirements | Operator agreements, sandbox APIs, accredited customs/broker connections remain external dependencies |
+| CL-07 | Broker opt-in profile, certificate review, approved directory, inquiry/recipient acceptance | Manual evidence review, not automatic licence/accreditation validation |
+| CL-02/03/05 | Disabled operator adapters and explicit capabilities | Operator agreements, sandbox APIs and accredited customs connections remain external dependencies |
 
 ## Security boundaries
 
@@ -45,3 +46,5 @@ Create individual administrator accounts with `ops/create-admin.mjs`, using JSON
 ## Required release gates
 
 Authenticated business integration tests, two-company negative tests, concurrency/capacity tests, restart persistence, backup/restore, browser desktop/mobile/BG/EN/ZH tests, performance budget, independent security review and client acceptance. A successful development test is not production acceptance. Public domains, Cloudflare Tunnel, production and real shipments stay outside this change.
+
+See [OPERATIONS.md](OPERATIONS.md) for the verified scenarios, latest test evidence, deployment/recovery steps and remaining launch decisions.

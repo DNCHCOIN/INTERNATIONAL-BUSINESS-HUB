@@ -6,6 +6,7 @@ import pg from 'pg';
 import * as helpers from './common.mjs';
 import {authenticate,identityRoutes} from './identity.mjs';
 import {documentRoutes} from './documents.mjs';
+import {SECTORS,ACTIVITIES} from './profile.mjs';
 const base=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 pg.types.setTypeParser(1082,x=>x);
 export async function start(config){
@@ -18,13 +19,13 @@ export async function start(config){
  const handlers={trade:createTradeRoutes(helpers),caspian:createCaspianRoutes(helpers)};
  const buckets=new Map();
  function limit(key,max=120,window=60000){const now=Date.now();if(buckets.size>10000)for(const [k,v] of buckets)if(v.end<now)buckets.delete(k);let b=buckets.get(key);if(!b||b.end<=now){b={count:0,end:now+window};buckets.set(key,b);}if(++b.count>max)helpers.fail(429,'rate_limited');}
- const servers=[];
+ const servers=[];let uploads=0;
  for(const area of ['hub','trade','caspian']){
   const port=config.ports[area];const server=http.createServer(async(req,res)=>{
    res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');res.setHeader('X-Frame-Options','DENY');res.setHeader('Cache-Control','no-store');
    res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");
    res.setHeader('Permissions-Policy','camera=(), microphone=(), geolocation=()');
-   const host=String(req.headers.host||'');
+   const host=String(req.headers.host||'');let uploading=false;
    try{
     if(![`127.0.0.1:${port}`,`localhost:${port}`].includes(host))helpers.fail(403,'host_denied');
     if(!['GET','HEAD','POST','PUT','PATCH','DELETE'].includes(req.method))helpers.fail(405,'method_not_allowed');
@@ -36,16 +37,17 @@ export async function start(config){
      if(mutating){
       if(!['/api/auth/register','/api/auth/login','/api/auth/accept-invitation'].includes(url.pathname)){helpers.requireUser({user});if(req.headers['x-csrf-token']!==user.csrf)helpers.fail(403,'csrf_denied');}
       if(['/api/auth/register','/api/auth/accept-invitation'].includes(url.pathname))limit('registration',20,3600000);
+      if(url.pathname==='/api/documents'){if(uploads>=2)helpers.fail(429,'busy_retry');uploads++;uploading=true;}
       const chunks=[];let size=0;const max=url.pathname==='/api/documents'?7100000:131072;
       for await(const chunk of req){size+=chunk.length;if(size>max)helpers.fail(413,'body_too_large');chunks.push(chunk);}
       try{body=JSON.parse(Buffer.concat(chunks).toString('utf8'));}catch{helpers.fail(400,'invalid_json');}helpers.check(body && typeof body==='object' && !Array.isArray(body),'invalid_json',400);
      }
      const ctx={...pools,config,area,req,res,url,user,body,limit,secure:false,status:200};let result;
-     if(url.pathname==='/api/environment' && req.method==='GET')result={area,mode:'private_staging',data:'synthetic',platforms:Object.fromEntries(Object.entries(config.ports).map(([k,v])=>[k,`http://${host.startsWith('localhost')?'localhost':'127.0.0.1'}:${v}/`])),email_delivery:'not_configured',legal_verification:'human_review',cross_domain_sso:'not_configured'};
+     if(url.pathname==='/api/environment' && req.method==='GET')result={area,mode:'private_staging',data:'synthetic',taxonomy:{sectors:SECTORS,activities:ACTIVITIES},platforms:Object.fromEntries(Object.entries(config.ports).map(([k,v])=>[k,`http://${host.startsWith('localhost')?'localhost':'127.0.0.1'}:${v}/`])),email_delivery:'not_configured',legal_verification:'human_review',cross_domain_sso:'not_configured'};
      else if(url.pathname==='/api/health' && req.method==='GET'){await Promise.all(Object.values(pools).map(p=>p.query('SELECT 1')));result={ok:true,mode:'private_staging',version:'0.1.0'};}
      else if(url.pathname==='/api/dashboard' && req.method==='GET'){
       const u=helpers.requireUser(ctx);
-      if(u.system_role==='administrator')result={companies:(await pools.identity.query('SELECT status,count(*)::int AS total FROM identity.companies GROUP BY status')).rows,memory_rss_bytes:process.memoryUsage().rss,uptime_seconds:Math.floor(process.uptime()),email_delivery:'not_configured'};
+      if(u.system_role==='administrator'){result={companies:(await pools.identity.query('SELECT status,count(*)::int AS total FROM identity.companies GROUP BY status')).rows,...(await pools.trade.query('SELECT trade.admin_statistics() AS stats')).rows[0].stats,...(await pools.caspian.query('SELECT caspian.admin_statistics() AS stats')).rows[0].stats,memory_rss_bytes:process.memoryUsage().rss,uptime_seconds:Math.floor(process.uptime()),email_delivery:'not_configured'};try{const m=JSON.parse(await fs.readFile(path.join(path.dirname(process.env.DNCH_CONFIG||''),'monitor.json'),'utf8'));result.monitor={checked_at:m.checked_at,ok:m.ok,checks:m.checks,backup_age_hours:m.backup_age_hours};}catch{result.monitor=null;}}
       else {helpers.requireCompany(ctx);result=await helpers.scoped(pools.trade,u.company_id,async c=>({listings:Number((await c.query("SELECT count(*) FROM trade.listings WHERE company_id=$1 AND status<>'removed'",[u.company_id])).rows[0].count),inquiries:Number((await c.query('SELECT count(*) FROM trade.inquiries')).rows[0].count)}));Object.assign(result,await helpers.scoped(pools.caspian,u.company_id,async c=>({cargo:Number((await c.query("SELECT count(*) FROM caspian.cargo_requests WHERE status<>'cancelled'")).rows[0].count),shipments:Number((await c.query('SELECT count(*) FROM caspian.shipments')).rows[0].count)})));}
      }else if(url.pathname.startsWith('/api/documents'))result=await documentRoutes(ctx);
      else if(url.pathname.startsWith('/api/trade/') && area==='trade')result=await handlers.trade(ctx);
@@ -61,7 +63,7 @@ export async function start(config){
     if(!file){let name=url.pathname==='/preview'?'index.html':url.pathname.slice(1);if(!/^[A-Za-z0-9_-]+\.(html|js|css|svg|png|jpg|webp|ico)$/.test(name))helpers.fail(404,'not_found');file=path.join(config.sources[area],name);}
     const mime={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.mjs':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.png':'image/png','.jpg':'image/jpeg','.webp':'image/webp','.ico':'image/x-icon'};
     const bytes=await fs.readFile(file);res.writeHead(200,{'Content-Type':mime[path.extname(file)],'Content-Length':bytes.length});res.end(req.method==='HEAD'?undefined:bytes);
-   }catch(e){if(res.headersSent){res.destroy();return;}let status=e.status||500,code=e.code||'internal_error';if(e.code==='23505'){status=409;code='duplicate_record';}if(['23503','23514','22P02','22007','22008'].includes(e.code)){status=422;code='invalid_input';}if(e.code==='ENOENT'){status=404;code='not_found';}if(status===500)console.error('request_failed',e.code||e.name);res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:code,fields:e.fields}));}
+   }catch(e){if(res.headersSent){res.destroy();return;}let status=e.status||500,code=e.status?(e.code||'request_error'):'internal_error';if(e.code==='23505'){status=409;code='duplicate_record';}if(['23503','23514','22P02','22007','22008'].includes(e.code)){status=422;code='invalid_input';}if(e.code==='ENOENT'){status=404;code='not_found';}if(status===500)console.error('request_failed',e.code||e.name);res.writeHead(status,{'Content-Type':'application/json; charset=utf-8'});res.end(JSON.stringify({error:code,fields:e.fields}));}finally{if(uploading)uploads--;}
   });
   server.requestTimeout=15000;server.headersTimeout=5000;server.maxConnections=40;
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});servers.push(server);
