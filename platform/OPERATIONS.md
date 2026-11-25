@@ -50,3 +50,9 @@ To inspect recovery safely, use `ops/restore-extract.mjs ARCHIVE NEW_EMPTY_DIREC
 - Real shipment acceptance tests remain explicitly deferred by Tsvetan. Apps, payments, AI helpers and mailbox services are not added or purchased.
 
 Overall completion is unestimated. The release is a functioning private implementation of the stated scenarios, with the above launch/business gaps still open.
+
+## Deployed staging follow-up
+
+Private deployment completed successfully (PID 303310), with a reversible copy at `backups/pre-business-20261125T103334Z`. The manual backup job and PostgreSQL/application restart passed (303650); all three APIs and DNCH 8083 returned 200. Private config/.git requests were 404, unapproved Host requests 403, and PostgreSQL had no TCP listener. During four parallel password checks (401/429/429/401), 20 DNCH samples remained 200, maximum 79 ms (303781). The subsequent live check (309233) still found both services active/running with zero automatic restarts and all four endpoints healthy.
+
+The backup runner now writes a temporary maintenance marker and always removes it while restarting only the business service. Monitoring records planned backup maintenance separately and continues checking DNCH System. Markers older than 15 minutes no longer suppress business health checks. Verification (309347, exit 0) covered maintenance mode, stale-marker handling, an actual backup/restart, marker cleanup, all four endpoints 200 and three encrypted backups. These operations changes do not alter the business API; the 123-check business QA above remains the evidence for that code.

@@ -111,9 +111,8 @@ cat > "$DNCH_RUNTIME/backup.sh" <<SCRIPT
 set -euo pipefail
 export DNCH_CONFIG=$DNCH_CONFIG PG_BIN=$PG_BIN PGHOST=$PGHOST PGPORT=18810
 export DNCH_BACKUP_DIR=$DNCH_BACKUP_DIR DNCH_BACKUP_KEY=$DNCH_BACKUP_KEY
-systemctl --user stop dnch-client-hosting.service
-trap 'systemctl --user start dnch-client-hosting.service' EXIT
-$node_bin $DNCH_SOURCE_ROOT/hub/platform/ops/backup.mjs --application-stopped
+export DNCH_NODE=$node_bin
+exec /run/current-system/sw/bin/bash $DNCH_SOURCE_ROOT/hub/platform/ops/backup-service.sh
 SCRIPT
 cat > "$unit_dir/dnch-client-backup.service" <<UNIT
 [Unit]
